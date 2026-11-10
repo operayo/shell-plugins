@@ -1,17 +1,16 @@
 # cfuse
 
 Keep several Cloud Foundry logins (e.g. different SAP BTP landscapes) active at
-the same time — one per terminal — and switch with a single word.
+the same time — one per terminal — and switch with a single command.
 
 ```console
 $ cfuse
-Landscapes (~/.config/cfuse/landscapes):
-   cust           eu10
- * dev            eu20-001
-   prod           eu20-005
+   customer       eu10
+ * operayo        eu20-001
+   operayo        eu10-005
 
-$ cfuse prod
-CF_HOME → ~/.cfuse/prod
+$ cfuse operayo eu10-005
+CF_HOME → ~/.cfuse/operayo@eu10-005
 Not logged in – starting login…
 ...
 ```
@@ -21,9 +20,10 @@ Works in **zsh** and **bash** (incl. macOS bash 3.2 and dev containers).
 ## How it works
 
 The cf CLI stores its login in `$CF_HOME/.cf/config.json` (default `~/.cf`).
-`cfuse <name>` sets `CF_HOME=~/.cfuse/<name>` for the current shell, so every
-name has its own token, API endpoint and org/space target. If that name is not
-logged in yet (or the token has expired), it runs `cf login --sso -a <api>`.
+`cfuse <name> <region>` sets `CF_HOME=~/.cfuse/<name>@<region>` for the current
+shell, so every name + region has its own token, API endpoint and org/space
+target. If it is not logged in yet (or the token has expired), it runs
+`cf login --sso -a https://api.cf.<region>.hana.ondemand.com`.
 
 ## Install
 
@@ -47,57 +47,73 @@ zinit ice pick"plugins/cfuse/cfuse.plugin.zsh"; zinit light operayo/shell-plugin
 **Manually:** `source …/plugins/cfuse/cfuse.plugin.zsh` in `~/.zshrc` (after
 `compinit`) or `source …/plugins/cfuse/cfuse.bash` in `~/.bashrc`.
 
-## Configure landscapes
+## Usage
 
-The installer creates `~/.config/cfuse/landscapes` from
-[`landscapes.example`](landscapes.example). Edit it: one `name region` per line. The region is the part of the CF API endpoint
-between `api.cf.` and `.hana.ondemand.com`:
+| Command | Effect |
+|---|---|
+| `cfuse` | List logins and landscapes; `*` marks the active one |
+| `cfuse <name> <region>` | Switch this shell to `<name>` on `<region>`, log in if needed |
+| `cfuse <name>` | Same, with the region looked up (see below) |
+| `cfuse --discover` | Print landscape lines for all CF environments the btp CLI sees |
+| `cfuse --help` | Help |
+| `unset CF_HOME` | Back to the default `~/.cf` login |
+
+`Tab` completes names, and after a name its regions, in both shells.
+
+**Which region `cfuse <name>` uses:** the regions known for that name — from
+the landscapes file and from saved logins — are combined:
+
+- exactly one → that one
+- several → `cfuse` lists them and asks which (Enter cancels)
+- none → a login without region (`~/.cfuse/<name>`); cf asks for the API endpoint
+
+So with a single landscape per name, typing the name is enough; with several,
+add the region or pick one.
+
+## Landscapes (optional)
+
+`~/.config/cfuse/landscapes` gives your landscapes short names, so `cfuse`
+can list and complete them before your first login. The installer creates it
+from [`landscapes.example`](landscapes.example) with all entries commented out.
+One `name region` per line; a name may appear once per region:
 
 ```
-dev   eu20-001     # https://api.cf.eu20-001.hana.ondemand.com
-prod  eu20-005
+operayo   eu20-001     # https://api.cf.eu20-001.hana.ondemand.com
+operayo   eu10-005
+customer  eu10
 ```
 
-Find your regions in the BTP Cockpit (subaccount → Overview → *Cloud Foundry
-Environment* → API Endpoint), or let `cfuse --discover` list them (needs the
-[btp CLI](https://tools.hana.ondemand.com/#cloud-btpcli) and `jq`, and
-`btp login --sso` first):
+The region is the part of the CF API endpoint between `api.cf.` and
+`.hana.ondemand.com`. Find it in the BTP Cockpit (subaccount → Overview →
+*Cloud Foundry Environment* → API Endpoint), or let `cfuse --discover` list
+them (needs the [btp CLI](https://tools.hana.ondemand.com/#cloud-btpcli) and
+`jq`, and `btp login --sso` first):
 
 ```console
 $ cfuse --discover
 acme-dev eu20-001   # ACME Dev (org: acme-dev-org)
 ```
 
-## Usage
-
-| Command | Effect |
-|---|---|
-| `cfuse` | List landscapes and saved logins; `*` marks the active one |
-| `cfuse <name>` | Switch this shell to `<name>`, log in if needed |
-| `cfuse <name> <region>` | Same, for a name not in the config (or to override it) |
-| `cfuse --discover` | Print config lines for all CF environments the btp CLI sees |
-| `cfuse --help` | Help |
-| `unset CF_HOME` | Back to the default `~/.cf` login |
-
-`Tab` completes names in both shells.
+Without the file, `cfuse <name> <region>` works just the same, and logins you
+have made show up in the list and in completion.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `CFUSE_CONFIG` | `~/.config/cfuse/landscapes` | Landscapes file |
-| `CFUSE_HOME` | `~/.cfuse` | Where the per-name logins live |
+| `CFUSE_HOME` | `~/.cfuse` | Where the logins live |
 | `CFUSE_SSO` | `1` | `0` = user/password login instead of `--sso` |
 
 ## Good to know
 
-- The region only matters when a login starts. An existing login keeps the
-  endpoint it was created with; run `cf login` again (or delete
-  `~/.cfuse/<name>`) after changing its region.
 - `CF_HOME` is per shell. A new terminal starts on the default `~/.cf` login
   until you run `cfuse`.
 - Plain scripts, CI jobs and IDE tasks don't load your shell rc file; set
-  `CF_HOME=~/.cfuse/<name>` there directly.
+  `CF_HOME=~/.cfuse/<name>@<region>` there directly.
 - cf plugins (e.g. `multiapps` for `cf deploy`) are installed per `CF_HOME`,
-  so install them once per name.
+  so install them once per login.
+- Logins from older cfuse versions (`~/.cfuse/<name>`) still work as logins
+  without region; log in once with `cfuse <name> <region>` to switch to the
+  new layout.
 
 ## Dev containers
 

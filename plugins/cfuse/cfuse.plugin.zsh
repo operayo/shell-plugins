@@ -3,9 +3,10 @@
 source "${0:A:h}/cfuse.sh"
 
 _cfuse() {
-  if (( CURRENT == 2 )); then
-    compadd -- ${(f)"$(_cfuse_names)"} --list --discover --help
-  fi
+  case $CURRENT in
+    2) compadd -- ${(f)"$(_cfuse_names)"} --list --discover --help ;;
+    3) compadd -- ${(f)"$(_cfuse_regions_for "$words[2]")"} ;;
+  esac
 }
 
 (( $+functions[compdef] )) && compdef _cfuse cfuse
