@@ -49,16 +49,20 @@ zinit ice pick"plugins/cfuse/cfuse.plugin.zsh"; zinit light operayo/shell-plugin
 
 ## Usage
 
-| Command | Effect |
-|---|---|
-| `cfuse` | List logins and landscapes; `*` marks the active one |
-| `cfuse <name> <region>` | Switch this shell to `<name>` on `<region>`, log in if needed |
-| `cfuse <name>` | Same, with the region looked up (see below) |
-| `cfuse --discover` | Print landscape lines for all CF environments the btp CLI sees |
-| `cfuse --help` | Help |
-| `unset CF_HOME` | Back to the default `~/.cf` login |
+| Command | Short | Effect |
+|---|---|---|
+| `cfuse <name> <region>` | | Switch this shell to `<name>` on `<region>`, log in if needed |
+| `cfuse <name>` | | Same, with the region looked up (see below) |
+| `cfuse list` | `cfuse`, `-l` | List logins and landscapes; `*` marks the active one |
+| `cfuse discover` | `-d` | Print landscape lines for all CF environments the btp CLI sees |
+| `cfuse help [command]` | `-h` | Help; also `cfuse <command> --help` |
+| `unset CF_HOME` | | Back to the default `~/.cf` login |
 
-`Tab` completes names, and after a name its regions, in both shells.
+The long options `--list`, `--discover` and `--help` work too. `list`,
+`discover` and `help` are reserved and can't be used as landscape names.
+
+`Tab` completes commands and names, after a name its regions, and after
+`help` the command names, in both shells.
 
 **Which region `cfuse <name>` uses:** the regions known for that name — from
 the landscapes file and from saved logins — are combined:
@@ -85,12 +89,12 @@ customer  eu10
 
 The region is the part of the CF API endpoint between `api.cf.` and
 `.hana.ondemand.com`. Find it in the BTP Cockpit (subaccount → Overview →
-*Cloud Foundry Environment* → API Endpoint), or let `cfuse --discover` list
+*Cloud Foundry Environment* → API Endpoint), or let `cfuse discover` list
 them (needs the [btp CLI](https://tools.hana.ondemand.com/#cloud-btpcli) and
 `jq`, and `btp login --sso` first):
 
 ```console
-$ cfuse --discover
+$ cfuse discover
 acme-dev eu20-001   # ACME Dev (org: acme-dev-org)
 ```
 

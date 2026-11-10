@@ -4,12 +4,22 @@
 # A login lives in $CFUSE_HOME/<name>@<region>, or $CFUSE_HOME/<name> when no
 # region is known (cf then asks for the API endpoint).
 
+# Subcommands; these can't be used as landscape names.
+_CFUSE_COMMANDS="list discover help"
+
 _cfuse_config() {
   printf '%s\n' "${CFUSE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cfuse/landscapes}"
 }
 
 _cfuse_root() {
   printf '%s\n' "${CFUSE_HOME:-$HOME/.cfuse}"
+}
+
+_cfuse_is_command() {
+  case " $_CFUSE_COMMANDS " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
 }
 
 # All login keys (name@region or name): configured landscapes plus saved logins.
@@ -20,7 +30,7 @@ _cfuse_keys() {
   {
     [ -f "$cfg" ] && awk '!/^[[:space:]]*(#|$)/ { print ($2 == "" ? $1 : $1 "@" $2) }' "$cfg"
     [ -d "$root" ] && find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
-  } | sort -u
+  } | awk -F@ -v cmds=" $_CFUSE_COMMANDS " 'index(cmds, " " $1 " ") == 0' | sort -u
 }
 
 _cfuse_names() {
@@ -40,12 +50,17 @@ _cfuse_saved_region() {
 }
 
 _cfuse_list() {
-  local root keys key name region mark
+  local cfg root keys key name region mark skipped
+  cfg="$(_cfuse_config)"
   root="$(_cfuse_root)"
+  if [ -f "$cfg" ]; then
+    skipped="$(awk -v cmds=" $_CFUSE_COMMANDS " '!/^[[:space:]]*(#|$)/ && index(cmds, " " $1 " ") { print $1 }' "$cfg" | sort -u | paste -sd' ' -)"
+    [ -z "$skipped" ] || echo "cfuse: skipping '$skipped' in $cfg – reserved command names" >&2
+  fi
   keys="$(_cfuse_keys)"
   if [ -z "$keys" ]; then
-    echo "No landscapes yet. Add \"name region\" lines to $(_cfuse_config),"
-    echo "or run: cfuse <name> <region>    (or cfuse --discover after btp login --sso)"
+    echo "No landscapes yet. Add \"name region\" lines to $cfg,"
+    echo "or run: cfuse <name> <region>    (or cfuse discover after btp login --sso)"
     return
   fi
   printf '%s\n' "$keys" | while IFS= read -r key; do
@@ -102,30 +117,61 @@ _cfuse_discover() {
 }
 
 _cfuse_help() {
-  cat <<'EOF'
-Usage: cfuse                  list logins (* = active in this shell)
-       cfuse <name> <region>  switch to <name> on <region>, log in if needed
-       cfuse <name>           same; region from landscapes/saved logins
-                              (asks if there are several)
-       cfuse --discover       print "name region" lines from the btp CLI
-       cfuse --help
+  case "$1" in
+    list) cat <<'EOF'
+Usage: cfuse list            (also: cfuse, cfuse -l, cfuse --list)
+
+List all logins: landscapes from the landscapes file plus logins you have
+made, one line per name and region. * marks the login active in this shell.
+EOF
+    ;;
+    discover) cat <<EOF
+Usage: cfuse discover        (also: cfuse -d, cfuse --discover)
+
+Print "name region" lines for every Cloud Foundry environment the btp CLI
+can see, ready to paste into $(_cfuse_config).
+Needs: btp (logged in via 'btp login --sso') and jq.
+Covers the global account btp currently targets ('btp target' to switch).
+
+Example: cfuse discover >> $(_cfuse_config)
+EOF
+    ;;
+    switch) cat <<'EOF'
+Usage: cfuse <name> [region]
+
+Switch this shell to the login <name>@<region>; log in (SSO) if needed.
+Without region, the regions known for <name> (landscapes file and saved
+logins) are used: one → that one, several → you pick, none → cf asks for
+the API endpoint.
+
+Examples: cfuse operayo eu20-001
+          cfuse operayo
+EOF
+    ;;
+    *) cat <<'EOF'
+Usage: cfuse <command>
+       cfuse <name> [region]
+
+Commands:
+  list, -l          list logins (default; * = active in this shell)
+  discover, -d      print landscape lines from the btp CLI
+  help, -h          this help
+
+  <name> [region]   switch this shell to a login, log in if needed
+
+Run 'cfuse help <command>' or 'cfuse <command> --help' for details
+('cfuse help switch' for <name> [region]).
 
 Landscapes: "name region" lines in $CFUSE_CONFIG
-            (default ~/.config/cfuse/landscapes), e.g. "operayo eu20-001";
-            a name may appear once per region.
+            (default ~/.config/cfuse/landscapes), e.g. "operayo eu20-001".
 Logins:     stored under $CFUSE_HOME (default ~/.cfuse) as <name>@<region>.
 Login mode: SSO by default; set CFUSE_SSO=0 for user/password login.
 EOF
+    ;;
+  esac
 }
 
-cfuse() {
-  case "$1" in
-    ""|-l|--list) _cfuse_list; return ;;
-    -d|--discover) _cfuse_discover; return ;;
-    -h|--help) _cfuse_help; return ;;
-    -*) echo "cfuse: unknown option '$1'" >&2; _cfuse_help >&2; return 1 ;;
-  esac
-
+_cfuse_switch() {
   local name="$1" region="$2" regions key api
   case "$name" in
     *[!A-Za-z0-9_.-]*) echo "cfuse: invalid name '$name'" >&2; return 1 ;;
@@ -160,4 +206,35 @@ cfuse() {
     cf login "${args[@]}" || return
   fi
   cf target | grep -E '^(API endpoint|user|org|space):'
+}
+
+cfuse() {
+  local cmd
+  case "$1" in
+    ""|list|-l|--list) cmd=list ;;
+    discover|-d|--discover) cmd=discover ;;
+    help|-h|--help) _cfuse_help "$2"; return ;;
+    -*) echo "cfuse: unknown option '$1'" >&2; _cfuse_help >&2; return 1 ;;
+    *) cmd=switch ;;
+  esac
+
+  case "$2" in
+    -h|--help) _cfuse_help "$cmd"; return ;;
+  esac
+
+  case "$cmd" in
+    list|discover)
+      if [ -n "$2" ]; then
+        if _cfuse_is_command "$1"; then
+          echo "cfuse: '$1' is a command, not a landscape name" >&2
+        else
+          echo "cfuse: unexpected argument '$2'" >&2
+        fi
+        echo "Run 'cfuse help $cmd' for usage." >&2
+        return 1
+      fi
+      "_cfuse_$cmd"
+      ;;
+    switch) _cfuse_switch "$1" "$2" ;;
+  esac
 }

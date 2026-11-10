@@ -1,6 +1,6 @@
 # cfuse landscapes: one "name region" per line; a name may appear once per region.
 # Region = the part of the CF API endpoint between "api.cf." and ".hana.ondemand.com".
-# Tip: `cfuse --discover` prints these lines for your subaccounts.
+# Tip: `cfuse discover` prints these lines for your subaccounts.
 #
 # operayo   eu20-001
 # operayo   eu10-005
