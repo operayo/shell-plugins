@@ -1,0 +1,8 @@
+# cfuse landscapes: one "name region" per line.
+# Region = the part of the CF API endpoint between "api.cf." and ".hana.ondemand.com".
+# Copy to ~/.config/cfuse/landscapes (or set CFUSE_CONFIG) and adjust.
+# Tip: `cfuse --discover` prints these lines for your subaccounts.
+
+dev   eu20-001
+prod  eu20-005
+cust  eu10
