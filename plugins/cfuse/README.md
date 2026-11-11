@@ -55,14 +55,22 @@ zinit ice pick"plugins/cfuse/cfuse.plugin.zsh"; zinit light operayo/shell-plugin
 | `cfuse <name>` | | Same, with the region looked up (see below) |
 | `cfuse list` | `cfuse`, `-l` | List logins and landscapes; `*` marks the active one |
 | `cfuse discover` | `-d` | Print landscape lines for all CF environments the btp CLI sees |
+| `cfuse remove <name> [region]` | `-r` | Delete a saved login and its landscapes line (asks first; `-y` skips) |
 | `cfuse help [command]` | `-h` | Help; also `cfuse <command> --help` |
 | `unset CF_HOME` | | Back to the default `~/.cf` login |
 
-The long options `--list`, `--discover` and `--help` work too. `list`,
-`discover` and `help` are reserved and can't be used as landscape names.
+The long options `--list`, `--discover`, `--remove` and `--help` work too.
+`list`, `discover`, `remove` and `help` are reserved and can't be used as
+landscape names.
 
 `Tab` completes commands and names, after a name its regions, and after
 `help` the command names, in both shells.
+
+**Removing:** `cfuse remove operayo eu10-005` deletes the saved login
+(`~/.cfuse/operayo@eu10-005`: token, target and cf plugins installed under it)
+and the matching line in the landscapes file, after showing both and asking.
+Nothing on BTP changes. If the current shell used that login, `CF_HOME` is
+unset; other terminals still on it need a new `cfuse`.
 
 **Which region `cfuse <name>` uses:** the regions known for that name — from
 the landscapes file and from saved logins — are combined:

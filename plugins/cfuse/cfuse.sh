@@ -5,7 +5,7 @@
 # region is known (cf then asks for the API endpoint).
 
 # Subcommands; these can't be used as landscape names.
-_CFUSE_COMMANDS="list discover help"
+_CFUSE_COMMANDS="list discover remove help"
 
 _cfuse_config() {
   printf '%s\n' "${CFUSE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cfuse/landscapes}"
@@ -136,6 +136,18 @@ Covers the global account btp currently targets ('btp target' to switch).
 Example: cfuse discover >> $(_cfuse_config)
 EOF
     ;;
+    remove) cat <<EOF
+Usage: cfuse remove <name> [region] [-y]    (also: cfuse -r, cfuse --remove)
+
+Delete a saved login (~/.cfuse/<name>@<region>: token, target, cf plugins)
+and its line in $(_cfuse_config). Nothing on BTP is changed.
+Without region, the region is looked up like for switching (asks if several).
+Asks before deleting; -y / --yes skips the question.
+
+Examples: cfuse remove operayo eu10-005
+          cfuse remove operayo -y
+EOF
+    ;;
     switch) cat <<'EOF'
 Usage: cfuse <name> [region]
 
@@ -155,6 +167,7 @@ Usage: cfuse <command>
 Commands:
   list, -l          list logins (default; * = active in this shell)
   discover, -d      print landscape lines from the btp CLI
+  remove, -r        delete a saved login and its landscapes line
   help, -h          this help
 
   <name> [region]   switch this shell to a login, log in if needed
@@ -171,11 +184,17 @@ EOF
   esac
 }
 
-_cfuse_switch() {
-  local name="$1" region="$2" regions key api
+# Resolve <name> [region] to a login key (name@region, or name when no region
+# is known); asks when the name has several regions.
+_cfuse_resolve() {
+  local name="$1" region="$2" regions
   case "$name" in
-    *[!A-Za-z0-9_.-]*) echo "cfuse: invalid name '$name'" >&2; return 1 ;;
+    ""|*[!A-Za-z0-9_.-]*) echo "cfuse: invalid name '$name'" >&2; return 1 ;;
   esac
+  if _cfuse_is_command "$name"; then
+    echo "cfuse: '$name' is a command, not a landscape name" >&2
+    return 1
+  fi
   if [ -z "$region" ]; then
     regions="$(_cfuse_regions_for "$name")"
     case "$(printf '%s' "$regions" | grep -c .)" in
@@ -187,12 +206,15 @@ _cfuse_switch() {
   case "$region" in
     *[!a-z0-9-]*) echo "cfuse: invalid region '$region'" >&2; return 1 ;;
   esac
+  printf '%s\n' "$name${region:+@$region}"
+}
 
-  key="$name"
-  if [ -n "$region" ]; then
-    key="$name@$region"
-    api="https://api.cf.$region.hana.ondemand.com"
-  fi
+_cfuse_switch() {
+  local key api
+  key="$(_cfuse_resolve "$1" "$2")" || return 1
+  case "$key" in
+    *@*) api="https://api.cf.${key#*@}.hana.ondemand.com" ;;
+  esac
 
   export CF_HOME="$(_cfuse_root)/$key"
   mkdir -p "$CF_HOME" || return
@@ -208,11 +230,78 @@ _cfuse_switch() {
   cf target | grep -E '^(API endpoint|user|org|space):'
 }
 
+# cfuse remove <name> [region] [-y]: delete a saved login and its landscapes line.
+_cfuse_remove() {
+  local yes=0 name="" region="" arg key dir cfg has_dir=0 has_line=0 answer tmp
+  for arg in "$@"; do
+    case "$arg" in
+      -y|--yes) yes=1 ;;
+      -h|--help) _cfuse_help remove; return ;;
+      -*) echo "cfuse: unknown option '$arg'" >&2; return 1 ;;
+      *)
+        if [ -z "$name" ]; then name="$arg"
+        elif [ -z "$region" ]; then region="$arg"
+        else echo "cfuse: unexpected argument '$arg'" >&2; return 1
+        fi
+        ;;
+    esac
+  done
+  if [ -z "$name" ]; then
+    echo "cfuse: remove needs a name. Run 'cfuse help remove' for usage." >&2
+    return 1
+  fi
+
+  key="$(_cfuse_resolve "$name" "$region")" || return 1
+  name="${key%%@*}"
+  region=""
+  case "$key" in *@*) region="${key#*@}" ;; esac
+  dir="$(_cfuse_root)/$key"
+  cfg="$(_cfuse_config)"
+
+  [ -d "$dir" ] && has_dir=1
+  if [ -f "$cfg" ] && awk -v n="$name" -v r="$region" \
+      '!/^[[:space:]]*(#|$)/ && $1 == n && $2 == r { found = 1 } END { exit !found }' "$cfg"; then
+    has_line=1
+  fi
+  if [ "$has_dir" = 0 ] && [ "$has_line" = 0 ]; then
+    echo "cfuse: nothing to remove for '$name${region:+ $region}'" >&2
+    return 1
+  fi
+
+  echo "Remove $name${region:+ $region}:"
+  [ "$has_dir" = 1 ] && echo "  - saved login  $dir"
+  [ "$has_line" = 1 ] && echo "  - line         \"$name${region:+ $region}\" in $cfg"
+  if [ "$yes" = 0 ]; then
+    printf 'Continue? [y/N] '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *) echo "cfuse: cancelled" >&2; return 1 ;;
+    esac
+  fi
+
+  [ "$has_dir" = 1 ] && rm -rf "$dir"
+  if [ "$has_line" = 1 ]; then
+    # Rewrite in place (cat >) so a symlinked landscapes file stays a symlink.
+    tmp="$(mktemp)"
+    awk -v n="$name" -v r="$region" \
+      '!/^[[:space:]]*(#|$)/ && $1 == n && $2 == r { next } { print }' "$cfg" > "$tmp" &&
+      cat "$tmp" > "$cfg"
+    rm -f "$tmp"
+  fi
+  if [ "$CF_HOME" = "$dir" ]; then
+    unset CF_HOME
+    echo "This shell used that login – CF_HOME unset (back to ~/.cf)."
+  fi
+  echo "Removed."
+}
+
 cfuse() {
   local cmd
   case "$1" in
     ""|list|-l|--list) cmd=list ;;
     discover|-d|--discover) cmd=discover ;;
+    remove|-r|--remove) shift; _cfuse_remove "$@"; return ;;
     help|-h|--help) _cfuse_help "$2"; return ;;
     -*) echo "cfuse: unknown option '$1'" >&2; _cfuse_help >&2; return 1 ;;
     *) cmd=switch ;;
