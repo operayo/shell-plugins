@@ -1,7 +1,10 @@
-# cfuse landscapes: one "name region" per line; a name may appear once per region.
+# cfuse landscapes: one "name region [origin]" per line.
 # Region = the part of the CF API endpoint between "api.cf." and ".hana.ondemand.com".
-# Tip: `cfuse discover` prints these lines for your subaccounts.
+# Origin = identity provider key (optional): sap.ids for the default SAP IdP,
+#          or your custom IdP's origin key. Without it cfuse records the
+#          origin of your first login here automatically.
+# Tip: `cfuse discover` prints "name region" lines for your subaccounts.
 #
-# operayo   eu20-001
-# operayo   eu10-005
+# operayo   eu20-001   operayo-platform
+# operayo   eu20-001   sap.ids
 # customer  eu10
