@@ -68,6 +68,42 @@ clean() {
   fi
 }
 
+# login <dir> <claims>: save a login whose token carries the given claims
+# (printf format, so \033 and the like become raw bytes).
+login() {
+  mkdir -p "$1/.cf"
+  # shellcheck disable=SC2059
+  printf '{\n  "AccessToken": "bearer h.%s.s"\n}\n' \
+    "$(printf "$2" | base64 | tr -d '\n=' | tr '/+' '_-')" > "$1/.cf/config.json"
+}
+
+# Stand-in for the btp CLI: two subaccounts, one with escape sequences in its names.
+mkdir -p "$T/bin"
+cat > "$T/bin/btp" <<'EOF'
+#!/bin/sh
+case "$*" in
+  *accounts/subaccount*) cat <<'JSON'
+{"value": [
+  {"guid": "g1", "subdomain": "plain", "displayName": "Müller GmbH"},
+  {"guid": "g2", "subdomain": "evil", "displayName": "Bad \u001b[2JName"}
+]}
+JSON
+  ;;
+  *"-sa g1"*) cat <<'JSON'
+{"environmentInstances": [{"environmentType": "cloudfoundry",
+  "labels": "{\"API Endpoint\": \"https://api.cf.eu10.hana.ondemand.com\", \"Org Name\": \"org-one\"}"}]}
+JSON
+  ;;
+  *"-sa g2"*) cat <<'JSON'
+{"environmentInstances": [{"environmentType": "cloudfoundry",
+  "labels": "{\"API Endpoint\": \"https://api.cf.eu20.hana.ondemand.com\", \"Org Name\": \"org\\u001b]0;title\\u0007\"}"}]}
+JSON
+  ;;
+esac
+EOF
+chmod +x "$T/bin/btp"
+PATH="$T/bin:$PATH"
+
 # Does this awk give up on a byte that is invalid in the locale?
 awk_aborts() {
   ! printf 'a # \374b\n' | LANG="$LOCALE" awk '{ sub(/#.*/, "") } 1' > /dev/null 2>&1
@@ -145,6 +181,52 @@ for sh in bash zsh; do
   run "$sh" _cfuse_cfg_edit 'FNR == NR { next } linekey() == key { next } { print }' -v key=nosuch@eu10
   clean "edit: escape sequences after an invalid byte"
   if cmp -s "$cfg" "$T/cfg.orig"; then ok; else ko "edit: landscapes file left as it was"; fi
+
+  # --- saved tokens: shown as before, and never able to control the terminal ---
+
+  printf 'tok eu10\n' > "$cfg"
+  login "$T/home/.cfuse/tok@eu10" '{"user_name":"jane@example.com","origin":"sap.ids","exp":9999999999}'
+  run "$sh" cfuse list
+  {
+    fmt='%-1s  %-4s  %-6s  %-9s  %-16s  %s\n'
+    printf "$fmt" ' ' NAME REGION ORIGIN USER STATUS
+    printf "$fmt" ' ' tok eu10 '(sap.ids)' jane@example.com 'logged in'
+    printf '\n%s\n' "$footer"
+  } > "$T/exp"
+  same "list: user, origin and status from the saved token" out
+  : > "$T/exp"
+  same "list: no warning for a saved token" err
+
+  run "$sh" _cfuse_claim "$(printf '{"user_name":"j\303\266rg@example.com","exp":1}')" user_name
+  printf 'j\303\266rg@example.com' > "$T/exp"
+  same "claim: non-ASCII text is kept" out
+  run "$sh" _cfuse_claim "$(printf '{"user_name":"a\033[2Jb\302\233c\177d","exp":1}')" user_name
+  printf 'a[2Jbcd' > "$T/exp"
+  same "claim: control characters are dropped" out
+
+  login "$T/home/.cfuse/tok@eu10" '{"user_name":"a\033[2J\377b\302\233c","origin":"sap.ids","exp":9999999999}'
+  run "$sh" cfuse list
+  clean "list: escape sequences in a token claim"
+
+  printf '{\n  "AccessToken": "bearer h.ab\377\033[2Jcd.s"\n}\n' > "$T/home/.cfuse/tok@eu10/.cf/config.json"
+  run "$sh" cfuse list
+  clean "list: escape sequences in the saved token itself"
+  rm -rf "$T/home/.cfuse"
+
+  # --- discover: names from BTP may not control the terminal either ---
+
+  if command -v jq > /dev/null 2>&1; then
+    run "$sh" cfuse discover
+    {
+      printf '# Paste into %s and rename as you like\n' "$cfg"
+      printf 'plain eu10   # M\303\274ller GmbH (org: org-one)\n'
+      printf 'evil eu20   # Bad ?[2JName (org: org?]0;title?)\n'
+    } > "$T/exp"
+    same "discover: lines, with control characters replaced" out
+    clean "discover: escape sequences in BTP names"
+  else
+    echo "skip: discover tests need jq"
+  fi
 done
 
 echo "$pass passed, $fail failed"
