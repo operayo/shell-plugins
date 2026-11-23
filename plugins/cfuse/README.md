@@ -27,7 +27,9 @@ The cf CLI stores its login in `$CF_HOME/.cf/config.json` (default `~/.cf`).
 `CF_HOME=~/.cfuse/<name>@<region>@<origin>` for the current shell, so every
 landscape + identity provider has its own token, API endpoint and org/space
 target. If it is not logged in yet (or the token has expired), it runs
-`cf login --sso -a https://api.cf.<region>.hana.ondemand.com --origin <origin>`.
+`cf login --sso -a https://api.cf.<region>.hana.ondemand.com` and you choose
+the identity provider on the login page (with `CFUSE_SSO=0`:
+`cf login -a … --origin <origin>` with user/password).
 
 ## Install
 
@@ -82,8 +84,12 @@ and origin or pick one.
 
 **Origin (identity provider):** `sap.ids` is the default SAP IdP; a custom
 IdP has its own origin key (BTP Cockpit → subaccount → Security → Trust
-Configuration). With an origin, `cfuse` logs in with `--origin <origin>`.
-Without one, cf uses the default login page (where you may pick the IdP), and
+Configuration). cf can't combine SSO with a preselected IdP, so with an
+origin and SSO (the default) `cfuse` tells you which IdP to choose on the
+login page, then checks the new token: a login made with a different IdP is
+discarded (`cf logout`) and `cfuse` stops, so a login folder never holds
+another IdP's token. With `CFUSE_SSO=0` it passes `--origin <origin>` and cf
+asks for user/password of that IdP. Without an origin, cf uses the default login page (where you may pick the IdP), and
 right after the login `cfuse` reads the origin from the new token and records
 it: the login folder becomes `<name>@<region>@<origin>` and the landscapes
 line gets the origin as third column. From then on it's known — and older

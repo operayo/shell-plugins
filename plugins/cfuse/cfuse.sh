@@ -250,7 +250,7 @@ _cfuse_adopt() {
 }
 
 _cfuse_switch() {
-  local key name region origin shown api root
+  local key name region origin shown api root got
   key="$(_cfuse_resolve "$@")" || return 1
   IFS=@ read -r name region origin <<< "$key"
   [ -n "$region" ] && api="https://api.cf.$region.hana.ondemand.com"
@@ -263,11 +263,30 @@ _cfuse_switch() {
 
   if ! cf oauth-token >/dev/null 2>&1; then
     echo "Not logged in – starting login…"
+    # cf rejects --sso together with --origin: with SSO the IdP is picked on
+    # the login page, with password login it is passed as --origin.
     local args=()
-    [ "${CFUSE_SSO:-1}" = 0 ] || args+=(--sso)
     [ -n "$api" ] && args+=(-a "$api")
-    [ -n "$origin" ] && args+=(--origin "$origin")
+    if [ "${CFUSE_SSO:-1}" = 0 ]; then
+      [ -n "$origin" ] && args+=(--origin "$origin")
+    else
+      args+=(--sso)
+      [ -n "$origin" ] && echo "On the login page, choose the identity provider '$origin' if asked."
+    fi
     cf login "${args[@]}" || return
+
+    # A login folder must only hold a token of its own identity provider.
+    if [ -n "$origin" ]; then
+      got="$(_cfuse_claim "$(_cfuse_claims "$CF_HOME")" origin)"
+      if [ -z "$got" ]; then
+        echo "cfuse: couldn't read the origin from the token – can't confirm it is '$origin'" >&2
+      elif [ "$got" != "$origin" ]; then
+        cf logout >/dev/null 2>&1
+        echo "cfuse: logged in via '$got', but this login is for '$origin' – login discarded." >&2
+        echo "Run 'cfuse $name $region $origin' again and choose '$origin' on the login page." >&2
+        return 1
+      fi
+    fi
   fi
 
   shown="$origin"
@@ -415,8 +434,11 @@ Switch this shell to a login; log in (SSO) if needed.
 Every known login matching what you typed counts: one → used, several →
 you pick, none → a new login from your arguments.
 origin = identity provider key (e.g. sap.ids, or your custom IdP's key);
-cf login gets --origin <origin>. Without it, cf uses the default IdP and
-cfuse saves the origin it finds in the token, so it's known from then on.
+With SSO (default) you choose that IdP on the login page; cfuse checks the
+token afterwards and discards a login made with a different IdP. With
+CFUSE_SSO=0, cf login gets --origin <origin> and asks for user/password.
+Without origin, cf uses the default IdP and cfuse saves the origin it finds
+in the token, so it's known from then on.
 
 Examples: cfuse operayo eu20-001 operayo-platform
           cfuse operayo eu20-001
