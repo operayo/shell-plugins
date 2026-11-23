@@ -360,7 +360,9 @@ _cfuse_discover() {
         | (.labels | if type == "string" then fromjson else . end) as $l
         | ($l["API Endpoint:"] // $l["API Endpoint"] // "")
         | capture("api\\.cf\\.(?<r>[^.]+)\\.hana") .r
-        | "\($sub) \(.)   # \($disp) (org: \($l["Org Name:"] // $l["Org Name"] // "?"))"'
+        | "\($sub) \(.)   # \($disp) (org: \($l["Org Name:"] // $l["Org Name"] // "?"))"
+        # names come from BTP: no control characters (escape sequences) in the output
+        | gsub("\\p{Cc}"; "?")'
   done < <(btp --format json list accounts/subaccount |
              jq -r '.value[] | [.guid, .subdomain, .displayName] | @tsv')
 }
