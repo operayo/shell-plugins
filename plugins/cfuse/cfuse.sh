@@ -28,6 +28,21 @@ _cfuse_root() {
   printf '%s\n' "${CFUSE_HOME:-$HOME/.cfuse}"
 }
 
+# Make text from the landscapes file safe to show: anything but printable
+# ASCII becomes "?", so it can't carry terminal escape sequences.
+_cfuse_plain() {
+  LC_ALL=C tr -c '[:print:]\n' '?'
+}
+
+# awk for reading the landscapes file: same output and exit status, but its
+# error messages go through _cfuse_plain (some awks quote the offending line
+# when it holds a byte that is invalid in the locale).
+_cfuse_awk() {
+  local rc
+  { rc="$({ { awk "$@" 2>&1 >&3; printf '%s' "$?" >&4; } | _cfuse_plain >&2; } 4>&1)"; } 3>&1
+  return "${rc:-1}"
+}
+
 _cfuse_is_command() {
   case " $_CFUSE_COMMANDS " in
     *" $1 "*) return 0 ;;
@@ -52,9 +67,9 @@ _cfuse_keys() {
   cfg="$(_cfuse_config)"
   root="$(_cfuse_root)"
   {
-    [ -f "$cfg" ] && awk "$_CFUSE_AWK_KEY"' { k = linekey(); if (k != "") print k }' "$cfg"
+    [ -f "$cfg" ] && _cfuse_awk "$_CFUSE_AWK_KEY"' { k = linekey(); if (k != "") print k }' "$cfg"
     [ -d "$root" ] && find "$root" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
-  } | awk -F@ -v re="$_CFUSE_KEY_RE" -v cmds=" $_CFUSE_COMMANDS " \
+  } | _cfuse_awk -F@ -v re="$_CFUSE_KEY_RE" -v cmds=" $_CFUSE_COMMANDS " \
         '$0 ~ re && index(cmds, " " $1 " ") == 0' |
     sort -t@ -k1,1 -k2,2 -k3,3 -u
 }
@@ -118,10 +133,11 @@ _cfuse_list() {
   cfg="$(_cfuse_config)"
   root="$(_cfuse_root)"
   if [ -f "$cfg" ]; then
-    bad="$(awk -F@ "$_CFUSE_AWK_KEY"' { k = linekey(); if (k == "") next; split(k, p, "@")
+    bad="$(_cfuse_awk -F@ "$_CFUSE_AWK_KEY"' { k = linekey(); if (k == "") next; split(k, p, "@")
              if (k !~ re || index(cmds, " " p[1] " ")) print k }' \
-           re="$_CFUSE_KEY_RE" cmds=" $_CFUSE_COMMANDS " "$cfg" | paste -sd' ' -)"
-    [ -z "$bad" ] || echo "cfuse: skipping invalid or reserved entries in $cfg: $bad" >&2
+           re="$_CFUSE_KEY_RE" cmds=" $_CFUSE_COMMANDS " "$cfg" | _cfuse_plain | paste -sd' ' -)"
+    # printf, not echo: zsh's echo would expand \e and the like in $bad.
+    [ -z "$bad" ] || printf '%s\n' "cfuse: skipping invalid or reserved entries in $cfg: $bad" >&2
   fi
   keys="$(_cfuse_keys)"
   if [ -z "$keys" ]; then
@@ -206,7 +222,7 @@ _cfuse_cfg_edit() {
   cfg="$(_cfuse_config)"
   [ -f "$cfg" ] || return 0
   tmp="$(mktemp)" || return 1
-  if awk "$@" "$_CFUSE_AWK_KEY $prog" "$cfg" "$cfg" > "$tmp"; then
+  if _cfuse_awk "$@" "$_CFUSE_AWK_KEY $prog" "$cfg" "$cfg" > "$tmp"; then
     cat "$tmp" > "$cfg"
   fi
   rm -f "$tmp"
@@ -297,7 +313,7 @@ _cfuse_remove() {
   cfg="$(_cfuse_config)"
 
   [ -d "$dir" ] && has_dir=1
-  if [ -f "$cfg" ] && awk -v key="$key" "$_CFUSE_AWK_KEY"' linekey() == key { f = 1 } END { exit !f }' "$cfg"; then
+  if [ -f "$cfg" ] && _cfuse_awk -v key="$key" "$_CFUSE_AWK_KEY"' linekey() == key { f = 1 } END { exit !f }' "$cfg"; then
     has_line=1
   fi
   if [ "$has_dir" = 0 ] && [ "$has_line" = 0 ]; then
